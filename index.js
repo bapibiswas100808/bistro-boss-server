@@ -214,6 +214,59 @@ async function run() {
       const deleteResult = await cartCollections.deleteMany(query);
       res.send({ paymentResult, deleteResult });
     });
+    // Admin stats
+    app.get("/admin-stats", verifyToken, verifyAdmin, async (req, res) => {
+      const users = await userCollections.estimatedDocumentCount();
+      const menuItems = await menuCollections.estimatedDocumentCount();
+      const orders = await paymentCollections.estimatedDocumentCount();
+      const payments = await paymentCollections.find().toArray();
+      const totalPrice = payments.reduce(
+        (total, item) => total + item.price,
+        0
+      );
+      res.send({ users, menuItems, orders, totalPrice });
+    });
+    //aggregate pipeline
+    app.get("/order-stats", verifyToken, verifyAdmin, async (req, res) => {
+      const result = await paymentCollections
+        .aggregate([
+          {
+            $unwind: "$menuIds",
+          },
+          {
+            $lookup: {
+              from: "MenuCollections",
+              localField: "menuIds",
+              foreignField: "_id",
+              as: "menuItems",
+            },
+          },
+          {
+            $unwind: "$menuItems",
+          },
+          {
+            $group: {
+              _id: "$menuItems.category",
+              quantity: {
+                $sum: 1,
+              },
+              revenue: {
+                $sum: "$menuItems.price",
+              },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              category: "$_id",
+              quantity: "$quantity",
+              revenue: "$revenue",
+            },
+          },
+        ])
+        .toArray();
+      res.send(result);
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
